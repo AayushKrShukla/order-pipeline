@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   rabbitmq:
     image: rabbitmq:3-management
@@ -29,6 +27,28 @@ services:
       MP_SMTP_AUTH_ALLOW_INSECURE: "1"
     volumes:
       - mailpit_data:/data
+
+  api:
+    image: node:20-alpine
+    container_name: order-api
+    working_dir: /app
+    command: sh -c "npm ci --prefix services/api && node services/api/server.js"
+    # env_file:
+    #   - ./services/api/.env
+    environment:
+      environment:
+      # Override in .env if needed
+      PORT: 3000
+      # Use service name 'rabbitmq' for in-network DNS
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/local
+    volumes:
+      - ./:/app
+    ports:
+      - "3000:3000"
+    depends_on:
+      - rabbitmq
+      - mailpit
+    restart: unless-stopped
 
 volumes:
   rabbitmq_data:
