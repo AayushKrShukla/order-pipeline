@@ -49,6 +49,22 @@ services:
       - rabbitmq
       - mailpit
     restart: unless-stopped
+  
+  notifier:
+    image: node:20-alpine
+    container_name: notifier
+    working_dir: /app/services/notification
+    command: sh -c "npm ci && node consumer.js"
+    environment:
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/local
+    volumes: 
+      - ./:/app
+    depends_on:
+      - rabbitmq
+      - mailpit
+    restart: unless-stopped
 
 volumes:
   rabbitmq_data:

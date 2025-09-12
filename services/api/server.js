@@ -1,8 +1,14 @@
 import express from "express";
 import dotenv from "dotenv";
-import { publishOrderCreated } from "./publishers/rabbitPublisher.js";
+import {
+  initRabbit,
+  publishOrderCreated,
+} from "./publishers/rabbitPublisher.js";
 
 dotenv.config();
+
+const RABBIT_URL = process.env.RABBITMQ_URL;
+await initRabbit(RABBIT_URL);
 
 const app = express();
 app.use(express.json());
@@ -26,7 +32,7 @@ app.post("/orders", async (req, res) => {
     type: "order_created",
     id: `evt_${Date.now()}`,
     occuredAt: new Date().toISOString(),
-    date: { orderId, customerId, items, note: note || null },
+    data: { orderId, customerId, items, note: note || null },
   };
 
   await publishOrderCreated(event);
