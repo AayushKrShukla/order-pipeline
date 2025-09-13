@@ -66,6 +66,33 @@ services:
       - mailpit
     restart: unless-stopped
 
+  inventory:
+    image: node:20-alpine
+    container_name: inventory
+    working_dir: /app/services/inventory
+    command: sh -c "npm ci && node consumer.js"
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/local
+    volumes:
+     - ./:/app
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+  
+  audit:
+    image: node:20-alpine
+    container_name: audit
+    working_dir: /app/services/audit
+    command: sh -c "npm ci && node consumer.js"
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/local
+    volumes:
+     - ./:/app
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+
+    
 volumes:
   rabbitmq_data:
   mailpit_data:
