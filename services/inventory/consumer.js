@@ -74,7 +74,7 @@ async function publishEvent(routingKey, data, idempotencyKey) {
 }
 
 const isProcessed = db.prepare(
-  `SELECT 1 from processed_messages WHERE idempotency_key = ? AND event_type = ?`
+  `SELECT 1 FROM processed_messages WHERE idempotency_key = ? AND event_type = ?`
 );
 
 const markProcessed = db.prepare(
@@ -90,16 +90,16 @@ const reserveStock = db.prepare(`
   `);
 
 const releaseStock = db.prepare(`
-  UPDATE products SET reserved_stock = reserved_stock - ? WHERE sku = ? and reserved_stock >= ?
+  UPDATE products SET reserved_stock = reserved_stock - ? WHERE sku = ? AND reserved_stock >= ?
   `);
 
 const createReservation = db.prepare(
-  "INSERT INTO reservations (idempotency_key, order_id, sku, quantity, status) VALUES (?, ?, ?, ?, 'reserved)"
+  "INSERT INTO reservations (idempotency_key, order_id, sku, quantity, status) VALUES (?, ?, ?, ?, 'reserved')"
 );
 
 const releaseReservation = db.prepare(
   `UPDATE reservations
-  SET status = 'released
+  SET status = 'released'
   WHERE idempotency_key = ? AND sku = ? AND status = 'reserved'`
 );
 
@@ -126,7 +126,7 @@ async function handleReserveRequest(event) {
       unavailableItems.push({
         sku: item.sku,
         reason: "insufficient_stock",
-        available_stock: product.available_stock,
+        available: product.available_stock,
         requested: item.qty,
       });
     }
@@ -182,7 +182,7 @@ async function handleInventoryRelease(event) {
     return;
   }
 
-  const { orderId, items } = data;
+  const { orderId, reason } = data;
   console.log(`Releasing inventory for order ${orderId}, reason: ${reason}`);
 
   const reservations = getReservations.all(idempotencyKey);
@@ -253,7 +253,7 @@ async function processMessage(msg) {
 
     channel.ack(msg);
   } catch (error) {
-    console.error(`Error processing ${routingKey}:`, e);
+    console.error(`Error processing ${routingKey}:`, error);
     channel.nack(msg, false, false);
   }
 }
@@ -274,7 +274,7 @@ async function start() {
     console.log("=== INVENTORY STATUS ===");
     products.forEach((p) => {
       console.log(
-        `${p.sku}: ${p.available_stock}/${p.totla_stock} available (${p.reserved_stock} reserved)`
+        `${p.sku}: ${p.available_stock}/${p.total_stock} available (${p.reserved_stock} reserved)`
       );
     });
     console.log("========================");
