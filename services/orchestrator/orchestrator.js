@@ -47,7 +47,7 @@ async function publishEvent(routingKey, data, idempotencyKey) {
     type: routingKey,
     id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
     idempotencyKey,
-    occuredAt: new Date().toISOString(),
+    occurredAt: new Date().toISOString(),
     data,
   };
 

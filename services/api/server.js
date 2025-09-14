@@ -31,7 +31,7 @@ app.post("/orders", async (req, res) => {
   const event = {
     type: "order_created",
     id: `evt_${Date.now()}`,
-    occuredAt: new Date().toISOString(),
+    occurredAt: new Date().toISOString(),
     data: { orderId, customerId, items, note: note || null },
   };
 

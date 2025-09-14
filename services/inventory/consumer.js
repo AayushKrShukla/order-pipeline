@@ -11,8 +11,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS products (
     sku TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    total_stock INTEGER DEFAULT 0
-    reserved_stock INTEGER DEFAULT 0
+    total_stock INTEGER DEFAULT 0,
+    reserved_stock INTEGER DEFAULT 0,
     available_stock INTEGER GENERATED ALWAYS AS (total_stock - reserved_stock) STORED
   );
   
@@ -22,7 +22,7 @@ db.exec(`
     order_id TEXT NOT NULL,
     sku TEXT NOT NULL,
     quantity INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'reserved'
+    status TEXT NOT NULL DEFAULT 'reserved',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(idempotency_key, sku)
   );
@@ -37,7 +37,7 @@ db.exec(`
 `);
 
 const insertProduct = db.prepare(
-  "INSERT OR REPLACE INTO products (sku, name, total_stock, reserved_stock) values (?, ?, ?, COALESCE((SELECT reserved_stock FROM products WHERE sku = ?), 0))"
+  "INSERT OR REPLACE INTO products (sku, name, total_stock, reserved_stock) VALUES (?, ?, ?, COALESCE((SELECT reserved_stock FROM products WHERE sku = ?), 0))"
 );
 insertProduct.run("SKU-1", "Product A", 100, "SKU-1");
 insertProduct.run("SKU-2", "Product B", 50, "SKU-2");
@@ -60,14 +60,14 @@ async function publishEvent(routingKey, data, idempotencyKey) {
     type: routingKey,
     id: `evt_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
     idempotencyKey,
-    occuredAt: new Date().toISOString(),
+    occurredAt: new Date().toISOString(),
     data,
   };
 
   const payload = Buffer.from(JSON.stringify(event));
   await channel.publish(EXCHANGE, routingKey, payload, {
     contentType: "application/json",
-    peristent: true,
+    persistent: true,
   });
 
   console.log(`Published ${routingKey} for ${idempotencyKey}`);
@@ -86,11 +86,11 @@ const checkAvailability = db.prepare(`
 `);
 
 const reserveStock = db.prepare(`
-  UPDATE products SET reversed_stock = reserved_stock + ? WHERE sku = ?
+  UPDATE products SET reserved_stock = reserved_stock + ? WHERE sku = ?
   `);
 
 const releaseStock = db.prepare(`
-  UPDATE products SET reversed_stock = reserved_stock - ? WHERE sku = ? and reserved_stock >= ?
+  UPDATE products SET reserved_stock = reserved_stock - ? WHERE sku = ? and reserved_stock >= ?
   `);
 
 const createReservation = db.prepare(
@@ -161,11 +161,15 @@ async function handleReserveRequest(event) {
 
   const totalAmount = transaction();
 
-  await publishEvent("reserve.succeeded", {
-    orderId,
-    reservedItems: items,
-    totalAmount,
-  }, idempotencyKey);
+  await publishEvent(
+    "reserve.succeeded",
+    {
+      orderId,
+      reservedItems: items,
+      totalAmount,
+    },
+    idempotencyKey
+  );
 
   console.log(`Reserved inventory for order ${orderId}: ${items.length} items`);
 }

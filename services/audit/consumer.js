@@ -32,7 +32,7 @@ async function auditEvent(evt) {
     eventId,
     eventType: evt.type,
     data: evt.data,
-    originalTimestamp: evt.occuredAt,
+    originalTimestamp: evt.occurredAt,
   };
 
   appendFileSync(AUDIT_FILE, JSON.stringify(auditEntry) + "\n");
