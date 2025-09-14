@@ -1,6 +1,6 @@
 import amqp from "amqplib";
 import Database from "better-sqlite3";
-import { EXCHANGE, ROUTING_KEYS, SAGA_STATUS } from "./contracts";
+import { EXCHANGE, ROUTING_KEYS, SAGA_STATUS } from "./contracts.js";
 
 const db = new Database("sagas.db");
 db.pragma("journal_mode = VAL");
@@ -77,7 +77,7 @@ const getSaga = db.prepare(`
 
 const markProcessed = db.prepare(
   `
-  INSERT OR IGNORE INTO processed_messaged (message_id, idempotency_key, event_type) VALUES (?, ?, ?)
+  INSERT OR IGNORE INTO processed_messages (message_id, idempotency_key, event_type) VALUES (?, ?, ?)
   `
 );
 
@@ -120,3 +120,175 @@ async function handleOrderCreated(event) {
     console.error("Failed to start saga:", error);
   }
 }
+
+async function handleReserveSucceeded(event) {
+  const { idempotencyKey, data } = event;
+
+  if (isProcessed.get(idempotencyKey, "reserve.succeeded")) {
+    console.log(
+      `Reserve success ${idempotencyKey} already processed - skipping`
+    );
+    return;
+  }
+
+  const saga = getSaga.get(idempotencyKey);
+  if (!saga) {
+    console.error(`No saga found for ${idempotencyKey}`);
+    return;
+  }
+
+  updateSaga.run(
+    SAGA_STATUS.INVENTORY_RESERVED,
+    "process.payment",
+    idempotencyKey
+  );
+
+  await publishEvent(
+    ROUTING_KEYS.PAYMENT_REQUEST,
+    {
+      orderId: data.orderId,
+      amount: data.totalAmount || 99.99,
+    },
+    idempotencyKey
+  );
+
+  markProcessed.run(saga.saga_id, idempotencyKey, "reserve.succeeded");
+  console.log(`Saga ${saga.saga_id}: inventory reserved, requesting payment`);
+}
+
+async function handleReserveFailure(event) {
+  const { idempotencyKey } = event;
+
+  const saga = getSaga.get(idempotencyKey);
+  if (!saga) return;
+
+  updateSaga.run(SAGA_STATUS.FAILED, "failed", idempotencyKey);
+
+  await publishEvent(
+    ROUTING_KEYS.SAGA_FAILED,
+    {
+      reason: "inventory_unavailable",
+      orderId: JSON.parse(saga.order_data).orderId,
+    },
+    idempotencyKey
+  );
+
+  console.log(`Saga ${saga.saga_id}: failed due to inventory`);
+}
+
+async function handlePaymentSucceeded(event) {
+  const { idempotencyKey, data } = event;
+
+  if (isProcessed.get(idempotencyKey, "payment.succeeded")) {
+    return;
+  }
+
+  const saga = getSaga.get(idempotencyKey);
+  if (!saga) return;
+
+  updateSaga.run(SAGA_STATUS.COMPLETED, "completed", idempotencyKey);
+
+  await publishEvent(
+    ROUTING_KEYS.NOTIFY_REQUEST,
+    {
+      orderId: data.orderId,
+      message: "Order confirmed and payment processed",
+    },
+    idempotencyKey
+  );
+
+  await publishEvent(
+    ROUTING_KEYS.SAGA_COMPLETED,
+    {
+      orderId: data.orderId,
+    },
+    idempotencyKey
+  );
+
+  markProcessed.run(saga.saga_id, idempotencyKey, "payment.succeeded");
+  console.log(`Saga ${saga.saga_id}: completed successfully`);
+}
+
+async function handlePaymentFailed(event) {
+  const { idempotencyKey, data } = event;
+
+  const saga = getSaga.get(idempotencyKey);
+  if (!saga) return;
+
+  updateSaga.run(SAGA_STATUS.COMPENSATING, "compensating", idempotencyKey);
+
+  await publishEvent(
+    ROUTING_KEYS.INVENTORY_RELEASE,
+    {
+      orderId: data.orderId,
+      reason: "payment_failed",
+    },
+    idempotencyKey
+  );
+
+  updateSaga.run(SAGA_STATUS.FAILED, "failed", idempotencyKey);
+
+  await publishEvent(
+    ROUTING_KEYS.SAGA_FAILED,
+    {
+      reason: "payment_failed",
+      orderId: data.orderId,
+    },
+    idempotencyKey
+  );
+
+  console.log(`Saga ${saga.saga_id}: compensating and failing due to payment`);
+}
+
+async function processMessage(msg) {
+  const event = JSON.parse(msg.content.toString());
+  const routingKey = msg.fields.routingKey;
+
+  console.log(`Processing ${routingKey} for ${event.idempotencyKey}`);
+
+  try {
+    switch (routingKey) {
+      case ROUTING_KEYS.ORDER_CREATED:
+        await handleOrderCreated(event);
+        break;
+      case ROUTING_KEYS.RESERVE_SUCCEEDED:
+        await handleReserveSucceeded(event);
+        break;
+      case ROUTING_KEYS.RESERVE_FAILED:
+        await handleReserveFailure(event);
+        break;
+      case ROUTING_KEYS.PAYMENT_SUCCEEDED:
+        await handlePaymentSucceeded(event);
+        break;
+      case ROUTING_KEYS.PAYMENT_FAILED:
+        await handlePaymentFailed(event);
+        break;
+      default:
+        console.log(`Unknown routing key: ${routingKey}`);
+    }
+  } catch (error) {
+    console.error(`Error processing ${routingKey}:`, e);
+    channel.nack(msg, false, false);
+  }
+}
+
+async function start() {
+  const conn = await amqp.connect(process.env.RABBITMQ_URL);
+  channel = await conn.createChannel();
+
+  await setupTopology(channel);
+  channel.prefetch(1);
+
+  await channel.consume(QUEUE, processMessage, { noAck: false });
+
+  console.log("Orchestrator service started");
+
+  process.on("SIGINT", async () => {
+    db.close();
+    await channel.close();
+    await conn.close();
+    process.exit(0);
+  });
+}
+
+start().catch(console.error);

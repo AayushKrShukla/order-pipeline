@@ -92,6 +92,19 @@ services:
       - rabbitmq
     restart: unless-stopped
 
+  orchestrator:
+    image: node:20-alpine
+    container_name: orchestrator
+    working_dir: /app/services/orchestrator
+    command: sh -c "npm ci && node orchestrator.js"
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/local
+    volumes:
+      - ./:/app
+    depends_on:
+      - rabbitmq
+    restart: unless-stopped
+
     
 volumes:
   rabbitmq_data:
