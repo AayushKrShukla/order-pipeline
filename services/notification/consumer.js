@@ -69,8 +69,6 @@ async function start() {
 
         ch.ack(msg);
       } catch (e) {
-        // console.error("notify error", e);
-
         const headers = msg.properties.headers || {};
         const attempts = Number(headers["x-attempts"] || 0);
 
